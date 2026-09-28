@@ -1,0 +1,81 @@
+model = readCbModel('fuc101.xml'); 
+One subSystem per reaction, so each model.subSystems{x} is a character array.
+>> glcMetabolites = {};
+    glcIndex = 0;
+>> for i = 1:length(model.mets)
+        if contains(lower(model.mets{i}), 'glc_')
+            glcIndex = glcIndex + 1;
+            glcMetabolites{glcIndex} = model.mets{i};
+        end
+    end
+>> if glcIndex == 0
+        fprintf('在模型中未找到与"glc_"相关的代谢物。\n');
+        return;
+    end
+>> glcReactions = {};
+    reactionIndex = 0;
+>> for i = 1:length(glcMetabolites)
+        % 获取该代谢物在模型中的索引
+        metIndex = find(ismember(model.mets, glcMetabolites{i}));
+        
+        % 查找该代谢物作为反应物的所有反应（系数为负）
+        reactantReactions = find(model.S(metIndex, :) < 0);
+        
+        % 过滤非交换反应（排除以"EX_"开头的反应）
+        for j = 1:length(reactantReactions)
+            rxnIndex = reactantReactions(j);
+            rxnId = model.rxns{rxnIndex};
+            
+            % 检查是否为非交换反应（非EX_开头）
+            if ~startsWith(lower(rxnId), 'ex_')
+                reactionIndex = reactionIndex + 1;
+                
+                glcReactions{reactionIndex}.id = rxnId;
+                glcReactions{reactionIndex}.name = model.rxnNames{rxnIndex};
+                glcReactions{reactionIndex}.metabolite = glcMetabolites{i};
+                glcReactions{reactionIndex}.stoichiometry = model.S(metIndex, rxnIndex);
+                
+                % 尝试获取反应方程式
+                try
+                    % 尝试使用printRxnFormula获取完整方程式
+                    glcReactions{reactionIndex}.equation = printRxnFormula(model, rxnIndex);
+                catch
+                    % 如果失败，则手动构建简化的方程式
+                    reactants = {};
+                    products = {};
+                    
+                    % 获取反应的化学计量向量
+                    stoichVector = model.S(:, rxnIndex);
+                    
+                    % 构建反应物和产物列表
+                    for k = 1:length(model.mets)
+                        if stoichVector(k) < 0
+                            % 反应物
+                            reactants{end+1} = sprintf('%.2f %s', -stoichVector(k), model.mets{k});
+                        elseif stoichVector(k) > 0
+                            % 产物
+                            products{end+1} = sprintf('%.2f %s', stoichVector(k), model.mets{k});
+                        end
+                    end
+                    
+                    % 构建简化的方程式字符串
+                    reactantStr = strjoin(reactants, ' + ');
+                    productStr = strjoin(products, ' + ');
+                    glcReactions{reactionIndex}.equation = [reactantStr ' => ' productStr];
+                end
+            end
+        end
+    end
+>>  if reactionIndex > 0
+        fprintf('找到%d个以glc_作为反应物的非交换反应：\n', reactionIndex);
+        for i = 1:reactionIndex
+            fprintf('%d. ID: %s\n', i, glcReactions{i}.id);
+            fprintf('   名称: %s\n', glcReactions{i}.name);
+            fprintf('   反应物: %s\n', glcReactions{i}.metabolite);
+            fprintf('   化学计量系数: %.4f\n', glcReactions{i}.stoichiometry);
+            fprintf('   反应方程式: %s\n\n', glcReactions{i}.equation);
+        end
+    else
+        fprintf('未找到以glc_作为反应物的非交换反应。\n');
+    end
+end   
